@@ -5,9 +5,6 @@ on:
     branches:
       - master
 
-env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,33 +19,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get version and build time
         run: |
-          $path = 'version.json'
-          if (-not (Test-Path -Path $path)) {
-            Write-Error 'version.json not found.'
+          if [ ! -f "version.json" ]; then
+            echo "version.json not found."
             exit 1
-          }
-          $data = Get-Content $path | ConvertFrom-Json
-          $version = $data.version
-          if (-not $version) { $version = 'unknown' }
-          try {
-            $tz = [System.TimeZoneInfo]::FindSystemTimeZoneById('Asia/Shanghai')
-            $build_time = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $tz).ToString('yyyy-MM-dd HH:mm:ss')
-          } catch {
-            $build_time = (Get-Date).ToUniversalTime().AddHours(8).ToString('yyyy-MM-dd HH:mm:ss')
-          }
-          $data.build_time = $build_time
-          $data | ConvertTo-Json -Depth 10 | Set-Content $path
-          echo "version=$version" >> $env:GITHUB_ENV
-          echo "build_time=$build_time" >> $env:GITHUB_ENV
-        shell: pwsh
+          fi
+          version=$(jq -r '.version // "unknown"' version.json)
+          build_time=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          jq --arg bt "$build_time" '.build_time = $bt' version.json > version_tmp.json && mv version_tmp.json version.json
+          echo "version=$version" >> $GITHUB_ENV
+          echo "build_time=$build_time" >> $GITHUB_ENV
+        shell: bash
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
@@ -56,6 +45,6 @@ jobs:
           context: .
           push: true
           tags: |
-            guovern/iptv-api:latest
-            guovern/iptv-api:${{ env.version }}
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ env.version }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7
